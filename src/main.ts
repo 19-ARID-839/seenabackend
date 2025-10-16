@@ -1,8 +1,9 @@
 // main.ts
 
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import * as dotenv from 'dotenv';
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+import * as dotenv from "dotenv";
+import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   dotenv.config();
@@ -10,15 +11,23 @@ async function bootstrap() {
 
   // ✅ Enable CORS for frontend requests
   app.enableCors({
-    origin: 'http://localhost:8080', // frontend dev server
-    credentials: true,               // allow cookies if needed
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Accept, Authorization',
+    origin: "http://localhost:8080",
+    credentials: true,
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Accept", "Authorization"],
   });
 
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix("api");
+app.use((req: Request, res: Response, next: NextFunction) => {
+  console.log("➡️ Request:", req.method, req.url);
+  console.log("   Authorization:", req.headers.authorization || "❌ none");
+  next();
+});
   const port = process.env.PORT || 4000;
   await app.listen(port);
-  console.log(`🚀 Server running on http://localhost:${port}/api, mongo detail: ${process.env.MONGO_URI}`);
+  console.log(
+    `🚀 Server running on http://localhost:${port}/api, mongo detail: ${process.env.MONGO_URI}`
+  );
+  
 }
 bootstrap();
