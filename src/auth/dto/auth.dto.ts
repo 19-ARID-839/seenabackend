@@ -29,47 +29,86 @@ export class RegisterDto {
   }[];
 }
 
+// src/auth/dto/create-institute.dto.ts
 export class CreateInstituteDto {
-  // 🧑‍💼 Director Info
+  // Director Info
   directorName!: string;
   directorEmail!: string;
-  directorPhone!: string;
+  directorPhone?: string;
   directorCnic?: string;
   password!: string;
   confirmPassword?: string;
 
-  // 🏫 Institute Info
+  // Institute Info
   instituteName!: string;
+  address?: string;
   city?: string;
-  branch?: string;
+  campusType?: string;
   instituteType?: string;
   establishedYear?: string;
   registrationNo?: string;
 
-  // 👨‍🏫 Principal
-  principal?: {
-    name: string;
-    cnic?: string;
-    email?: string;
-    phone?: string;
-  };
+  // Location fields
+  country?: string;
+  province?: string;
+  zone?: string;              // ✅ For Islamabad & similar regions
+  sector?: string;
+  subSector?: string;
+  division?: string;
+  district?: string;
+  tehsil?: string;
+  unionCouncil?: string;
+  village?: string;
 
-  // 👩‍💼 Vice Principal
-  vicePrincipal?: {
-    name: string;
-    cnic?: string;
-    email?: string;
-    phone?: string;
-  };
-
-  // 🧑‍💻 Admin / Manager
-  admin?: {
-    name: string;
-    cnic?: string;
-    email?: string;
-    phone?: string;
-  };
+  // Optional default role users
+  principal?: { name?: string; cnic?: string; email?: string; phone?: string };
+  vicePrincipal?: { name?: string; cnic?: string; email?: string; phone?: string };
+  admin?: { name?: string; cnic?: string; email?: string; phone?: string };
 }
+
+
+
+// export class CreateInstituteDto {
+//   // 🧑‍💼 Director Info
+//   directorName!: string;
+//   directorEmail!: string;
+//   directorPhone!: string;
+//   directorCnic?: string;
+//   password!: string;
+//   confirmPassword?: string;
+
+//   // 🏫 Institute Info
+//   instituteName!: string;
+//   city?: string;
+//   branch?: string;
+//   instituteType?: string;
+//   establishedYear?: string;
+//   registrationNo?: string;
+
+//   // 👨‍🏫 Principal
+//   principal?: {
+//     name: string;
+//     cnic?: string;
+//     email?: string;
+//     phone?: string;
+//   };
+
+//   // 👩‍💼 Vice Principal
+//   vicePrincipal?: {
+//     name: string;
+//     cnic?: string;
+//     email?: string;
+//     phone?: string;
+//   };
+
+//   // 🧑‍💻 Admin / Manager
+//   admin?: {
+//     name: string;
+//     cnic?: string;
+//     email?: string;
+//     phone?: string;
+//   };
+// }
 
 export class createUserDto {
   name!: string;

@@ -27,7 +27,8 @@ export class Profile {
 
   // 🧑‍🎓 STUDENT FIELDS
   @Prop({ unique: true, sparse: true }) rollNumber?: string;
-  @Prop({ unique: true, sparse: true }) studentId?: string;
+  @Prop() studentId?: string;
+
   @Prop() className?: string;
   @Prop() section?: string;
   @Prop({ type: [String], default: [] }) subjects?: string[];
@@ -69,7 +70,8 @@ export class Profile {
 
   // 👨‍👩‍👧 PARENT FIELDS
   @Prop({ unique: true, sparse: true }) parentId?: string; // optional unique parent code
-  @Prop({ type: [Types.ObjectId], ref: "User", default: [] }) childIds?: Types.ObjectId[];
+  @Prop({ type: [Types.ObjectId], ref: "User", default: [] })
+  childIds?: Types.ObjectId[];
   @Prop() relation?: string; // father/mother/guardian
   @Prop() occupation?: string;
   @Prop() workplace?: string;
