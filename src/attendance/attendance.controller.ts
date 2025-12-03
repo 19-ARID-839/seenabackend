@@ -1,9 +1,11 @@
-import { Controller, Post, Body, Get, Query, Param, Put, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, Get, Query, Param, Put, BadRequestException, Req, UseGuards } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { CreateAttendanceDto } from './dto/create-attendance.dto';
 import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
 import { QueryAttendanceDto } from './dto/query-attendance.dto';
 import { CreateLeaveDto, ApproveLeaveDto } from './dto/leave.dto';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { Request } from 'express';
 
 @Controller('attendance')
 export class AttendanceController {
@@ -14,6 +16,15 @@ export class AttendanceController {
   async mark(@Body() body: CreateAttendanceDto) {
     return this.attendanceService.markAttendance(body as any);
   }
+  @UseGuards(JwtAuthGuard)
+  // @Roles('admin', 'teacher')
+  @Post('pending/run')
+  async runPendingCron(@Req() req: Request & { user?: { email?: string; _id?: string } }) {
+    console.log(`🧑‍🏫 ${req.user?.email} triggered manual pending attendance run`);
+    return this.attendanceService.createPendingAttendanceDaily();
+  }
+  
+
 
 
   /** Bulk mark attendance for many users */

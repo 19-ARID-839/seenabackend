@@ -6,6 +6,10 @@ import { InstitutesModule } from './institutes/institutes.module';
 import * as dotenv from 'dotenv';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ClassesModule } from './classes/classes.module';
+import { NotificationModule } from './notification/notification.module';
+import { ClubModule } from './club/club.module';
+import { TaskModule } from './tasks/task.module';
 
 dotenv.config();
 
@@ -16,7 +20,11 @@ dotenv.config();
     AuthModule,
     UsersModule,
     InstitutesModule,
-    AttendanceModule
+    AttendanceModule,
+    ClassesModule,
+    NotificationModule,
+    ClubModule,
+    TaskModule
   ],
 })
 export class AppModule {}

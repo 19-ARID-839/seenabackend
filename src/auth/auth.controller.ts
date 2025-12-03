@@ -9,10 +9,22 @@ import { Request } from "express";
 export class AuthController {
   constructor(private authService: AuthService) {}
 
-  @Post("register")
+  @Post('registerdirector')
   async registerFullInstitute(@Body() data: CreateInstituteDto) {
     return this.authService.registerFullInstitute(data);
   }
+
+
+// @Post('registerdirector')
+// async registerFullInstitute(@Body() data: CreateInstituteDto) {
+//   return this.authService.registerFullInstitute(data);
+// }
+
+
+  // @Post("register")
+  // async registerFullInstitute(@Body() data: CreateInstituteDto) {
+  //   return this.authService.registerFullInstitute(data);
+  // }
 
   @Post("register-user")
   async registerUser(@Body() data: CreateInstituteDto) {

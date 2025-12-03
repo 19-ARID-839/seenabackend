@@ -33,6 +33,55 @@ export class AttendanceService {
     return date;
   }
 
+  // async markAttendance(payload: {
+  //   user: string;
+  //   institute: string;
+  //   date?: string;
+  //   status: string;
+  //   checkIn?: string;
+  //   checkOut?: string;
+  //   meta?: any;
+  //   createdBy?: string;
+  // }) {
+  //   const {
+  //     user,
+  //     institute,
+  //     date,
+  //     status,
+  //     checkIn,
+  //     checkOut,
+  //     meta,
+  //     createdBy,
+  //   } = payload;
+  //   if (!user || !institute)
+  //     throw new BadRequestException("user and institute are required");
+
+  //   await this.usersService.findById(user);
+  //   await this.institutesService.findById(institute);
+
+  //   const d = this.normalizeDate(date || new Date());
+
+  //   const update: any = {
+  //     user: new Types.ObjectId(user),
+  //     institute: new Types.ObjectId(institute),
+  //     date: d,
+  //     status,
+  //     meta: meta || {},
+  //     createdBy,
+  //   };
+  //   if (checkIn) update.checkIn = new Date(checkIn);
+  //   if (checkOut) update.checkOut = new Date(checkOut);
+
+  //   const doc = await this.attendanceModel
+  //     .findOneAndUpdate(
+  //       { user: user, date: d },
+  //       { $set: update },
+  //       { upsert: true, new: true, setDefaultsOnInsert: true }
+  //     )
+  //     .exec();
+
+  //   return doc;
+  // }
   async markAttendance(payload: {
     user: string;
     institute: string;
@@ -42,45 +91,81 @@ export class AttendanceService {
     checkOut?: string;
     meta?: any;
     createdBy?: string;
+    updatedBy?: string;
   }) {
-    const {
-      user,
-      institute,
-      date,
-      status,
-      checkIn,
-      checkOut,
-      meta,
-      createdBy,
-    } = payload;
-    if (!user || !institute)
-      throw new BadRequestException("user and institute are required");
+    try {
+      const {
+        user,
+        institute,
+        date,
+        status,
+        checkIn,
+        checkOut,
+        meta,
+        createdBy,
+        updatedBy,
+      } = payload;
 
-    await this.usersService.findById(user);
-    await this.institutesService.findById(institute);
+      console.log("🟡 Attendance Payload:", payload);
 
-    const d = this.normalizeDate(date || new Date());
+      // --- 1️⃣ Validation ---
+      if (!user || !institute) {
+        throw new BadRequestException("user and institute are required");
+      }
 
-    const update: any = {
-      user: new Types.ObjectId(user),
-      institute: new Types.ObjectId(institute),
-      date: d,
-      status,
-      meta: meta || {},
-      createdBy,
-    };
-    if (checkIn) update.checkIn = new Date(checkIn);
-    if (checkOut) update.checkOut = new Date(checkOut);
+      if (!Types.ObjectId.isValid(user) || !Types.ObjectId.isValid(institute)) {
+        throw new BadRequestException("Invalid user or institute ID");
+      }
 
-    const doc = await this.attendanceModel
-      .findOneAndUpdate(
-        { user: user, date: d },
-        { $set: update },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      )
-      .exec();
+      // --- 2️⃣ Ensure references exist ---
+      const [userDoc, instDoc] = await Promise.all([
+        this.usersService.findById(user),
+        this.institutesService.findById(institute),
+      ]);
 
-    return doc;
+      if (!userDoc) throw new NotFoundException(`User not found: ${user}`);
+      if (!instDoc)
+        throw new NotFoundException(`Institute not found: ${institute}`);
+
+      // --- 3️⃣ Normalize date to day-start (avoid timezone mismatches) ---
+      const d = this.normalizeDate(date || new Date());
+
+      // --- 4️⃣ Build update document ---
+      const update: any = {
+        user: new Types.ObjectId(user),
+        institute: new Types.ObjectId(institute),
+        date: d,
+        status,
+        meta: meta || {},
+        updatedBy: updatedBy ? new Types.ObjectId(updatedBy) : createdBy,
+        createdBy,
+      };
+
+      if (checkIn) update.checkIn = new Date(checkIn);
+      if (checkOut) update.checkOut = new Date(checkOut);
+
+      // --- 5️⃣ Upsert by (user + date) ---
+      const doc = await this.attendanceModel
+        .findOneAndUpdate(
+          { user: new Types.ObjectId(user), date: d }, // ✅ FIXED: both as ObjectId
+          { $set: update },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        )
+        .exec();
+
+      console.log("✅ Attendance saved:", doc);
+      return doc;
+    } catch (error) {
+      const errMsg =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+          ? error
+          : JSON.stringify(error);
+
+      console.error("🔴 Attendance Error:", errMsg);
+      throw new BadRequestException(errMsg || "Failed to mark attendance");
+    }
   }
 
   async bulkMark(institute: string, items: Array<any>) {
@@ -150,67 +235,60 @@ export class AttendanceService {
   //   return records;
   // }
 
-  async getAttendanceByRole(userId: string, from?: string, to?: string) {
-    const user = await this.userModel.findById(userId).lean();
-    if (!user) throw new NotFoundException("User not found");
+async getAttendanceByRole(userId: string, from?: string, to?: string) {
+  const user = await this.userModel.findById(userId).lean();
+  if (!user) throw new NotFoundException("User not found");
 
-    const filter: any = {};
-    const dateFilter: any = {};
+  const filter: any = {};
+  const dateFilter: any = {};
 
-    if (from) dateFilter.$gte = new Date(from);
-    if (to) dateFilter.$lte = new Date(to);
-    if (Object.keys(dateFilter).length > 0) filter.date = dateFilter;
+  if (from) dateFilter.$gte = new Date(from);
+  if (to) dateFilter.$lte = new Date(to);
+  if (Object.keys(dateFilter).length > 0) filter.date = dateFilter;
 
-    // 🎓 STUDENT: get only their own attendance
-    if (user.role === "student") {
-      filter.user = user._id;
-    }
-
-    // 👨‍👩‍👧 PARENT: get attendance for all linked children
-    // else if (user.role === "parent") {
-    //   if (Array.isArray(user.children) && user.children.length > 0) {
-    //     filter.user = {
-    //       $in: user.children.map((id) => new Types.ObjectId(id)),
-    //     };
-    //   } else {
-    //     // no linked children → return empty
-    //     return [];
-    //   }
-    // }
-
-    // 🧑‍🏫 TEACHER / ADMIN / PRINCIPAL / DIRECTOR: get all students of same institute
-    else if (
-      ["teacher", "admin", "principal", "director"].includes(user.role)
-    ) {
-      // find all student IDs under same institute
-      const students = await this.userModel
-        .find({ institute: user.institute, role: "student" })
-        .select("_id")
-        .lean();
-
-      if (students.length === 0) return [];
-      filter.user = { $in: students.map((s) => s._id) };
-    }
-
-    // 🚫 Unsupported roles (like driver, etc.)
-    else {
-      throw new ForbiddenException("This role cannot view attendance");
-    }
-
-    // 🗂️ Fetch attendance records
-    const records = await this.attendanceModel
-      .find(filter)
-      .populate("user")
-      .sort({ date: -1 })
-      .lean();
-
-    // ✅ Ensure today’s pending attendance record exists (only for self or children)
-    if (["student", "parent"].includes(user.role)) {
-      await this.ensureTodayPending(user, records);
-    }
-
-    return records;
+  // 🎓 STUDENT: get only their own attendance
+  if (user.role === "student") {
+    filter.user = user._id;
   }
+  // 🧑‍🏫 TEACHER / ADMIN: get all students from same institute
+  else if (["teacher", "admin", "principal", "director"].includes(user.role)) {
+    const students = await this.userModel
+      .find({ institute: user.institute, role: "student" })
+      .select("_id")
+      .lean();
+    filter.user = { $in: students.map((s) => s._id) };
+  } else {
+    throw new ForbiddenException("This role cannot view attendance");
+  }
+
+  // 🗂️ Fetch attendance with user details
+  const records = await this.attendanceModel
+    .find(filter)
+    .populate("user")
+    .sort({ date: -1 })
+    .lean();
+
+  // ✅ Ensure today's pending for student/parent
+  if (["student", "parent"].includes(user.role)) {
+    await this.ensureTodayPending(user, records);
+  }
+
+  // 🧩 Add fatherName by manually fetching it from DB
+  for (const rec of records) {
+    const u: any = rec.user;
+    if (!u) continue;
+
+    const parent = u?.profile?.parents?.[0]?.parentId;
+    if (parent) {
+      const parentDoc = await this.userModel.findById(parent).select("name").lean();
+      u.fatherName = parentDoc?.name || "";
+    } else {
+      u.fatherName = "";
+    }
+  }
+
+  return records;
+}
 
   private async ensureTodayPending(user: any, records: any[]) {
     const today = new Date();
@@ -431,38 +509,49 @@ export class AttendanceService {
     return leave;
   }
 
-  @Cron("0 19 * * *") // 19 UTC = 12 AM PKT
-  async createPendingAttendanceDaily() {
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
+@Cron("0 0 * * *", { timeZone: "Asia/Karachi" }) // ⏰ runs daily at 12:00 AM PKT
+async createPendingAttendanceDaily() {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
 
-    const users = await this.userModel
-      .find({ isActive: true })
-      .select("_id institute");
-    if (!users.length) return;
+  console.log(`[Cron] ⏰ Running pending attendance job for ${today.toISOString()}`);
 
-    const ops = users.map((user) => ({
-      updateOne: {
-        filter: { user: user._id, date: today },
-        update: {
-          $setOnInsert: {
-            user: user._id,
-            institute: user.institute,
-            date: today,
-            status: "pending",
-          },
-        },
-        upsert: true,
-      },
-    }));
+  const students = await this.userModel
+    .find({ isActive: true, role: "student" })
+    .select("_id institute")
+    .lean();
 
-    if (ops.length) {
-      await this.attendanceModel.bulkWrite(ops, { ordered: false });
-      console.log(
-        `[Cron] Created ${ops.length} pending attendance entries for ${
-          today.toISOString().split("T")[0]
-        }`
-      );
-    }
+  if (!students.length) {
+    console.log("[Cron] ⚠️ No active students found");
+    return;
   }
+
+  const ops = students.map((student) => ({
+    updateOne: {
+      filter: { user: student._id, date: today },
+      update: {
+        $setOnInsert: {
+          user: student._id,
+          institute: student.institute,
+          date: today,
+          status: "pending",
+        },
+      },
+      upsert: true,
+    },
+  }));
+
+  try {
+    const res = await this.attendanceModel.bulkWrite(ops, { ordered: false });
+    console.log(
+      `[Cron] ✅ Created or skipped ${res.upsertedCount ?? 0} records for ${
+        today.toISOString().split("T")[0]
+      }`
+    );
+  } catch (err) {
+    console.error("🔴 [Cron] BulkWrite Error:", err);
+  }
+}
+
+
 }
