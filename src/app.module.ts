@@ -10,6 +10,7 @@ import { ClassesModule } from './classes/classes.module';
 import { NotificationModule } from './notification/notification.module';
 import { ClubModule } from './club/club.module';
 import { TaskModule } from './tasks/task.module';
+import { FinanceModule } from './finance/finance.module';
 
 dotenv.config();
 
@@ -24,7 +25,8 @@ dotenv.config();
     ClassesModule,
     NotificationModule,
     ClubModule,
-    TaskModule
+    TaskModule,
+    FinanceModule
   ],
 })
 export class AppModule {}

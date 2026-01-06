@@ -45,8 +45,9 @@ export class NotificationController {
   // notification.controller.ts
 @Get('user/:id')
 @UseGuards(JwtAuthGuard)
-async getUserNotifications(@Param('id') id: string) {
-  return this.notificationService.getUserNotifications(id);
+async getUserNotifications(@Param('id') id: string, @Req() req: any) {
+  const userRole = req.user?.role;
+  return this.notificationService.getUserNotifications(id, userRole);
 }
 
  @Post('complaint')

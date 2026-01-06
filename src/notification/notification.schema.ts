@@ -21,6 +21,13 @@ export class Notification extends Document {
       "feereminder",
       "announcement",
       "complaint",
+      "leave_request",
+      "leave",
+      "salary",
+      "fee",
+      "event",
+      "exam",
+      "other",
     ],
 
     default: "general",

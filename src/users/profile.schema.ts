@@ -46,6 +46,23 @@ export class Profile {
   @Prop({ type: [ParentRefSchema], default: [] })
   parents?: ParentRef[]; // when student has 1..n parents
 
+  @Prop({
+  type: [
+    {
+      className: String,
+      sectionName: String,
+      roles: [String],
+    },
+  ],
+  default: [],
+})
+classRoles?: {
+  className: string;
+  sectionName: string;
+  roles: string[];
+}[];
+
+
   // 👨‍🏫 TEACHER FIELDS
   @Prop({ unique: true, sparse: true }) teacherId?: string;
   @Prop() qualification?: string;
@@ -57,6 +74,25 @@ export class Profile {
   @Prop() joiningDate?: string;
   @Prop() salary?: number;
   @Prop() employmentStatus?: "active" | "on-leave" | "resigned";
+
+  @Prop({
+  type: [
+    {
+      className: String,
+      sectionName: String,
+      subject: String,
+      isIncharge: Boolean,
+    },
+  ],
+  default: [],
+})
+assignedClasses?: {
+  className: string;
+  sectionName: string;
+  subject: string;
+  isIncharge: boolean;
+}[];
+
 
   // 👨‍💼 ADMIN / DIRECTOR FIELDS
   @Prop() instituteName?: string;

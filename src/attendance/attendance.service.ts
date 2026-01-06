@@ -12,6 +12,12 @@ import { UsersService } from "../users/users.service";
 import { InstitutesService } from "../institutes/institutes.service";
 import { Cron } from "@nestjs/schedule";
 import { User } from "../users/user.schema";
+import {
+  DecideLeaveDto,
+  ResubmitLeaveDto,
+  UpdateLeaveDto,
+} from "./dto/leave.dto";
+import { NotificationService } from "src/notification/notification.service";
 
 @Injectable()
 export class AttendanceService {
@@ -24,13 +30,53 @@ export class AttendanceService {
     @InjectModel(User.name)
     private readonly userModel: Model<User>,
     private usersService: UsersService,
-    private institutesService: InstitutesService
+    private institutesService: InstitutesService,
+    private notificationService: NotificationService
   ) {}
 
   private normalizeDate(d: string | Date) {
     const date = d ? new Date(d) : new Date();
     date.setUTCHours(0, 0, 0, 0);
     return date;
+  }
+
+  private async notify(payload: {
+    sender: string;
+    receiver: string;
+    receiverRole?: string;
+    institute: string;
+    message: string;
+    messageType: string;
+    meta?: any;
+  }) {
+    return this.notificationService.sendNotification({
+      sender: payload.sender,
+      receiver: payload.receiver,
+      institute: payload.institute,
+      messageType: payload.messageType,
+      medium: "in-app",
+      message: payload.message,
+      meta: payload.meta,
+    });
+  }
+
+  private async notifyRole(payload: {
+    sender: string;
+    receiverRole: string;
+    institute: string;
+    message: string;
+    messageType: string;
+    meta?: any;
+  }) {
+    return this.notificationService.sendRoleNotification({
+      sender: payload.sender,
+      receiverRole: payload.receiverRole,
+      institute: payload.institute,
+      messageType: payload.messageType,
+      medium: "in-app",
+      message: payload.message,
+      meta: payload.meta,
+    });
   }
 
   // async markAttendance(payload: {
@@ -235,60 +281,65 @@ export class AttendanceService {
   //   return records;
   // }
 
-async getAttendanceByRole(userId: string, from?: string, to?: string) {
-  const user = await this.userModel.findById(userId).lean();
-  if (!user) throw new NotFoundException("User not found");
+  async getAttendanceByRole(userId: string, from?: string, to?: string) {
+    const user = await this.userModel.findById(userId).lean();
+    if (!user) throw new NotFoundException("User not found");
 
-  const filter: any = {};
-  const dateFilter: any = {};
+    const filter: any = {};
+    const dateFilter: any = {};
 
-  if (from) dateFilter.$gte = new Date(from);
-  if (to) dateFilter.$lte = new Date(to);
-  if (Object.keys(dateFilter).length > 0) filter.date = dateFilter;
+    if (from) dateFilter.$gte = new Date(from);
+    if (to) dateFilter.$lte = new Date(to);
+    if (Object.keys(dateFilter).length > 0) filter.date = dateFilter;
 
-  // 🎓 STUDENT: get only their own attendance
-  if (user.role === "student") {
-    filter.user = user._id;
-  }
-  // 🧑‍🏫 TEACHER / ADMIN: get all students from same institute
-  else if (["teacher", "admin", "principal", "director"].includes(user.role)) {
-    const students = await this.userModel
-      .find({ institute: user.institute, role: "student" })
-      .select("_id")
-      .lean();
-    filter.user = { $in: students.map((s) => s._id) };
-  } else {
-    throw new ForbiddenException("This role cannot view attendance");
-  }
-
-  // 🗂️ Fetch attendance with user details
-  const records = await this.attendanceModel
-    .find(filter)
-    .populate("user")
-    .sort({ date: -1 })
-    .lean();
-
-  // ✅ Ensure today's pending for student/parent
-  if (["student", "parent"].includes(user.role)) {
-    await this.ensureTodayPending(user, records);
-  }
-
-  // 🧩 Add fatherName by manually fetching it from DB
-  for (const rec of records) {
-    const u: any = rec.user;
-    if (!u) continue;
-
-    const parent = u?.profile?.parents?.[0]?.parentId;
-    if (parent) {
-      const parentDoc = await this.userModel.findById(parent).select("name").lean();
-      u.fatherName = parentDoc?.name || "";
-    } else {
-      u.fatherName = "";
+    // 🎓 STUDENT: get only their own attendance
+    if (user.role === "student") {
+      filter.user = user._id;
     }
-  }
+    // 🧑‍🏫 TEACHER / ADMIN: get all students from same institute
+    else if (
+      ["teacher", "admin", "principal", "director"].includes(user.role)
+    ) {
+      const students = await this.userModel
+        .find({ institute: user.institute, role: "student" })
+        .select("_id")
+        .lean();
+      filter.user = { $in: students.map((s) => s._id) };
+    } else {
+      throw new ForbiddenException("This role cannot view attendance");
+    }
 
-  return records;
-}
+    // 🗂️ Fetch attendance with user details
+    const records = await this.attendanceModel
+      .find(filter)
+      .populate("user")
+      .sort({ date: -1 })
+      .lean();
+
+    // ✅ Ensure today's pending for student/parent
+    if (["student", "parent"].includes(user.role)) {
+      await this.ensureTodayPending(user, records);
+    }
+
+    // 🧩 Add fatherName by manually fetching it from DB
+    for (const rec of records) {
+      const u: any = rec.user;
+      if (!u) continue;
+
+      const parent = u?.profile?.parents?.[0]?.parentId;
+      if (parent) {
+        const parentDoc = await this.userModel
+          .findById(parent)
+          .select("name")
+          .lean();
+        u.fatherName = parentDoc?.name || "";
+      } else {
+        u.fatherName = "";
+      }
+    }
+
+    return records;
+  }
 
   private async ensureTodayPending(user: any, records: any[]) {
     const today = new Date();
@@ -309,35 +360,35 @@ async getAttendanceByRole(userId: string, from?: string, to?: string) {
     }
   }
 
-  async updateAttendanceStatus(
-    studentId: string,
-    instituteId: string,
-    date: string,
-    status: string,
-    updatedBy?: string
-  ) {
-    if (!studentId || !instituteId || !status) {
-      throw new BadRequestException("Missing required fields");
-    }
+  // async updateAttendanceStatus(
+  //   studentId: string,
+  //   instituteId: string,
+  //   date: string,
+  //   status: string,
+  //   updatedBy?: string
+  // ) {
+  //   if (!studentId || !instituteId || !status) {
+  //     throw new BadRequestException("Missing required fields");
+  //   }
 
-    const normalizedDate = this.normalizeDate(date || new Date());
+  //   const normalizedDate = this.normalizeDate(date || new Date());
 
-    const updated = await this.attendanceModel.findOneAndUpdate(
-      { user: new Types.ObjectId(studentId), date: normalizedDate },
-      {
-        $set: {
-          status,
-          institute: new Types.ObjectId(instituteId),
-          updatedBy: updatedBy ? new Types.ObjectId(updatedBy) : null,
-        },
-      },
-      { new: true, upsert: true }
-    );
+  //   const updated = await this.attendanceModel.findOneAndUpdate(
+  //     { user: new Types.ObjectId(studentId), date: normalizedDate },
+  //     {
+  //       $set: {
+  //         status,
+  //         institute: new Types.ObjectId(instituteId),
+  //         updatedBy: updatedBy ? new Types.ObjectId(updatedBy) : null,
+  //       },
+  //     },
+  //     { new: true, upsert: true }
+  //   );
 
-    if (!updated) throw new NotFoundException("Attendance record not found");
+  //   if (!updated) throw new NotFoundException("Attendance record not found");
 
-    return updated;
-  }
+  //   return updated;
+  // }
 
   async getAttendanceSummary(
     instituteId: string,
@@ -435,10 +486,27 @@ async getAttendanceByRole(userId: string, from?: string, to?: string) {
     to: string;
     reason?: string;
     meta?: any;
+    applicationText?: string;
+    className?: string;
+    sectionName?: string;
+    createdBy?: string;
+    createdByRole?: string;
   }) {
-    const { user, institute, from, to, reason, meta } = data;
+    const {
+      user,
+      institute,
+      from,
+      to,
+      reason,
+      meta,
+      applicationText,
+      className,
+      sectionName,
+    } = data;
     await this.usersService.findById(user);
     await this.institutesService.findById(institute);
+    if (new Date(from) > new Date(to))
+      throw new BadRequestException("From date cannot be after To date");
 
     const leave = new this.leaveModel({
       user: new Types.ObjectId(user),
@@ -448,110 +516,478 @@ async getAttendanceByRole(userId: string, from?: string, to?: string) {
       reason,
       meta: meta || {},
       status: "pending",
+      applicationText: applicationText || "",
+      className: data.className || "",
+      sectionName: data.sectionName || "",
+      createdBy: data.createdBy
+        ? new Types.ObjectId(data.createdBy)
+        : new Types.ObjectId(user),
+      createdByRole: data.createdByRole || "student",
+      allowedApproverRoles: ["teacher", "principal", "admin"],
+      currentApproverRole: "teacher",
+    });
+
+    const deadline = new Date();
+    deadline.setHours(deadline.getHours() + 3); // 2–3 hours
+
+    leave.teacherDeadline = deadline;
+    leave.currentApproverRole = "teacher";
+
+    await leave.save();
+
+    await this.notifyRole({
+      sender: user,
+      receiverRole: "teacher",
+      institute,
+      message: `New leave request from Class: ${className} Section: ${sectionName}`,
+      messageType: "leave_request",
+      meta: { leaveId: leave._id.toString() },
+    });
+
+    return leave;
+  }
+
+  async updateLeaveRequest(leaveId: string, dto: UpdateLeaveDto) {
+    const leave = await this.leaveModel.findById(leaveId);
+    if (!leave) throw new NotFoundException();
+
+    if (!leave.user.equals(new Types.ObjectId(dto.user))) {
+      throw new ForbiddenException("You cannot edit this request");
+    }
+
+    if (!["pending", "rejected"].includes(leave.status)) {
+      throw new BadRequestException("Cannot edit approved leave");
+    }
+
+    if (dto.from) leave.from = new Date(dto.from);
+    if (dto.to) leave.to = new Date(dto.to);
+    if (dto.reason) leave.reason = dto.reason;
+    if (dto.applicationText) leave.applicationText = dto.applicationText;
+
+    leave.status = "pending";
+    leave.currentApproverRole = "teacher";
+
+    const deadline = new Date();
+    deadline.setHours(deadline.getHours() + 3);
+    // 🚧 TEMP DEMO MODE — REMOVE AFTER TESTING
+    // const deadline = new Date(Date.now() + 2 * 60 * 1000); // +2 minutes
+
+    leave.teacherDeadline = deadline;
+
+    leave.timeline.push({
+      action: "updated",
+      by: leave.user,
+      role: "student",
+      at: new Date(),
     });
 
     return leave.save();
   }
 
   async listLeaves(
-    filter: { institute?: string; user?: string; status?: string } = {}
+    filter: {
+      institute?: string;
+      user?: string;
+      status?: string;
+      approverRole?: string;
+    } = {}
   ) {
     const q: any = {};
     if (filter.institute) q.institute = new Types.ObjectId(filter.institute);
     if (filter.user) q.user = new Types.ObjectId(filter.user);
     if (filter.status) q.status = filter.status;
-    return this.leaveModel.find(q).sort({ createdAt: -1 }).lean().exec();
+
+    // role-based visibility
+    if (filter.approverRole) {
+      if (filter.approverRole) {
+        q.currentApproverRole = filter.approverRole;
+        q.status = { $in: ["pending", "resubmitted"] };
+      }
+    }
+
+    return this.leaveModel
+      .find(q)
+      .sort({ createdAt: -1 })
+      .populate("user approver")
+      .lean()
+      .exec();
   }
 
-  async approveLeave(
-    leaveId: string,
-    approverId: string,
-    approve: boolean,
-    notes?: string
-  ) {
-    const leave = await this.leaveModel.findById(leaveId).exec();
+  async decideLeave(leaveId: string, dto: DecideLeaveDto) {
+    const { approverId, approve, rejectionReason } = dto;
+
+    const leave = await this.leaveModel.findById(leaveId);
     if (!leave) throw new NotFoundException("Leave not found");
+
+    const user = await this.usersService.findById(approverId);
+    if (!user) throw new NotFoundException("Approver not found");
+
+    if (!approve && !rejectionReason) {
+      throw new BadRequestException("Rejection reason required");
+    }
+    if (!leave.allowedApproverRoles?.includes(user.role)) {
+      throw new ForbiddenException("You are not allowed to act on this leave");
+    }
+    if (leave.status === "approved" || leave.status === "rejected") {
+      throw new BadRequestException("Leave already decided");
+    }
+
+    if (user.role === "teacher") {
+      const isIncharge = user.profile?.assignedClasses?.some(
+        (c) =>
+          String(c.className).trim() === String(leave.className).trim() &&
+          String(c.sectionName).trim() === String(leave.sectionName).trim() &&
+          c.isIncharge === true
+      );
+
+      if (!isIncharge) {
+        throw new ForbiddenException(
+          "Only class incharge can decide this leave"
+        );
+      }
+    }
+
+    if (user.role === "teacher" && leave.currentApproverRole !== "teacher") {
+      throw new ForbiddenException(
+        "Teacher can no longer act after escalation"
+      );
+    }
 
     leave.status = approve ? "approved" : "rejected";
     leave.approver = new Types.ObjectId(approverId);
-    if (!leave.meta) leave.meta = {};
-    leave.meta.approverNotes = notes;
-    await leave.save();
+    leave.rejectionReason = rejectionReason;
 
-    if (approve) {
-      const days: Date[] = [];
-      const cur = new Date(leave.from);
-      cur.setUTCHours(0, 0, 0, 0);
-      const to = new Date(leave.to);
-      to.setUTCHours(0, 0, 0, 0);
-      while (cur <= to) {
-        days.push(new Date(cur));
-        cur.setUTCDate(cur.getUTCDate() + 1);
-      }
-      const ops = days.map((d) => ({
-        updateOne: {
-          filter: { user: leave.user, date: d },
-          update: {
-            $set: {
-              user: leave.user,
-              institute: leave.institute,
-              date: d,
-              status: "onleave",
-            },
-          },
-          upsert: true,
-        },
-      }));
-      if (ops.length)
-        await this.attendanceModel.bulkWrite(ops, { ordered: false });
-    }
+    leave.timeline.push({
+      action: approve ? "approved" : "rejected",
+      by: leave.approver,
+      role: user.role,
+      note: rejectionReason,
+      at: new Date(),
+    });
 
+      await leave.save();
+
+
+  // ✅ Send notification to the leave creator
+  const message = approve
+    ? `Congratulations! Your leave request has been approved by ${user.name || user.email}.`
+    : `Your leave request has been rejected by ${user.name || user.email}. Reason: ${rejectionReason || "Not specified"}. You may resubmit if needed.`;
+
+  await this.notify({
+    sender: approverId,
+    receiver: leave.user.toString(),
+    institute: leave.institute.toString(),
+    message,
+    messageType: "leave", // must match your Notification enum
+  });
     return leave;
   }
 
-@Cron("0 0 * * *", { timeZone: "Asia/Karachi" }) // ⏰ runs daily at 12:00 AM PKT
-async createPendingAttendanceDaily() {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
+  async resubmitLeave(id: string, dto: ResubmitLeaveDto) {
+    const leave = await this.leaveModel.findById(id);
+    if (!leave) throw new NotFoundException();
 
-  console.log(`[Cron] ⏰ Running pending attendance job for ${today.toISOString()}`);
+    if (!leave.user.equals(dto.userId)) throw new ForbiddenException();
 
-  const students = await this.userModel
-    .find({ isActive: true, role: "student" })
-    .select("_id institute")
-    .lean();
+    if (leave.status !== "rejected")
+      throw new BadRequestException("Only rejected leaves can be resubmitted");
 
-  if (!students.length) {
-    console.log("[Cron] ⚠️ No active students found");
-    return;
+    leave.status = "resubmitted";
+    leave.studentResubmissionText = dto.text;
+    leave.currentApproverRole = "teacher";
+
+    const deadline = new Date();
+    deadline.setHours(deadline.getHours() + 3);
+
+    leave.teacherDeadline = deadline;
+
+    leave.timeline.push({
+      action: "resubmitted",
+      by: leave.user,
+      role: "student",
+      note: dto.text,
+      at: new Date(),
+    });
+
+  await leave.save();
+
+  // ✅ Notify all teachers / class incharge
+  await this.notifyRole({
+    sender: leave.user.toString(),
+    receiverRole: "teacher",
+    institute: leave.institute.toString(),
+    message: `Leave request has been resubmitted by the student. Please review.`,
+    messageType: "general",
+    meta: { leaveId: leave._id.toString() },
+  });
+
+  return leave;
+
   }
 
-  const ops = students.map((student) => ({
-    updateOne: {
-      filter: { user: student._id, date: today },
-      update: {
-        $setOnInsert: {
-          user: student._id,
-          institute: student.institute,
-          date: today,
-          status: "pending",
-        },
-      },
-      upsert: true,
-    },
-  }));
 
-  try {
-    const res = await this.attendanceModel.bulkWrite(ops, { ordered: false });
-    console.log(
-      `[Cron] ✅ Created or skipped ${res.upsertedCount ?? 0} records for ${
-        today.toISOString().split("T")[0]
-      }`
+async deleteLeave(leaveId: string, userId: string) {
+  const leave = await this.leaveModel.findById(leaveId);
+  if (!leave) throw new NotFoundException("Leave not found");
+
+  // Only creator can delete
+  if (!leave.user.equals(userId)) {
+    throw new ForbiddenException("You can only delete your own leave requests");
+  }
+
+  // Check leave status
+  if (leave.status === "approved" || leave.status === "resubmitted") {
+    throw new BadRequestException(
+      `Cannot delete a leave that is ${leave.status}`
     );
-  } catch (err) {
-    console.error("🔴 [Cron] BulkWrite Error:", err);
+  }
+
+  await leave.deleteOne();
+
+  return { message: "Leave request deleted successfully" };
+}
+
+
+  @Cron("0 0 * * *", { timeZone: "Asia/Karachi" }) // ⏰ runs daily at 12:00 AM PKT
+  async createPendingAttendanceDaily() {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    console.log(
+      `[Cron] ⏰ Running pending attendance job for ${today.toISOString()}`
+    );
+
+    const students = await this.userModel
+      .find({ isActive: true, role: "student" })
+      .select("_id institute")
+      .lean();
+
+    if (!students.length) {
+      console.log("[Cron] ⚠️ No active students found");
+      return;
+    }
+
+    const ops = students.map((student) => ({
+      updateOne: {
+        filter: { user: student._id, date: today },
+        update: {
+          $setOnInsert: {
+            user: student._id,
+            institute: student.institute,
+            date: today,
+            status: "pending",
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    try {
+      const res = await this.attendanceModel.bulkWrite(ops, { ordered: false });
+      console.log(
+        `[Cron] ✅ Created or skipped ${res.upsertedCount ?? 0} records for ${
+          today.toISOString().split("T")[0]
+        }`
+      );
+    } catch (err) {
+      console.error("🔴 [Cron] BulkWrite Error:", err);
+    }
+  }
+
+  @Cron("5 0 * * *", { timeZone: "Asia/Karachi" }) // 12:05 AM PKT
+  async markApprovedLeavesAttendance() {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    console.log(
+      `[Cron] 🌙 Marking leave attendance for ${today.toISOString()}`
+    );
+
+    // 1️⃣ Find approved leaves active today
+    const activeLeaves = await this.leaveModel.find({
+      status: "approved",
+      from: { $lte: today },
+      to: { $gte: today },
+    });
+
+    if (!activeLeaves.length) {
+      console.log("[Cron] ℹ️ No active leaves today");
+      return;
+    }
+
+    const ops = activeLeaves.map((leave) => ({
+      updateOne: {
+        filter: {
+          user: leave.user,
+          date: today,
+        },
+        update: {
+          $set: {
+            user: leave.user,
+            institute: leave.institute,
+            date: today,
+            status: "leave",
+            meta: {
+              leaveId: leave._id,
+              reason: leave.reason,
+            },
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    try {
+      const res = await this.attendanceModel.bulkWrite(ops, {
+        ordered: false,
+      });
+
+      console.log(
+        `[Cron] ✅ Leave attendance processed: ${res.upsertedCount ?? 0}`
+      );
+    } catch (err) {
+      console.error("[Cron] 🔴 Leave attendance error:", err);
+    }
+  }
+
+  @Cron("*/2 * * * *")
+  async escalateLeaves() {
+    const now = new Date();
+
+    await this.leaveModel.updateMany(
+      {
+        status: { $in: ["pending", "resubmitted"] },
+        currentApproverRole: "teacher",
+        teacherDeadline: { $lt: now },
+      },
+      {
+        $set: {
+          currentApproverRole: "principal",
+          allowedApproverRoles: ["principal", "admin", "viceprincipal"],
+        },
+        $push: {
+          timeline: {
+            action: "auto-escalated",
+            role: "system",
+            at: new Date(),
+          },
+        },
+      }
+    );
   }
 }
 
+//   async approveLeave(
+//   leaveId: string,
+//   approverId: string,
+//   approve: boolean,
+//   notes?: string,
+//   approverRole?: 'admin' | 'principal' | 'teacher'
 
-}
+// ) {
+//   const leave = await this.leaveModel.findById(leaveId);
+//   if (!leave) throw new NotFoundException("Leave not found");
+
+//   // Only allow roles assigned
+//   const user = await this.usersService.findById(approverId);
+//   if (!user) throw new NotFoundException("Approver not found");
+
+//   const allowedRoles = ['admin', 'director', 'principal', 'teacher'];
+//   if (!allowedRoles.includes(user.role)) {
+//     throw new ForbiddenException("You do not have permission to approve this leave");
+//   }
+
+//   leave.status = approve ? 'approved' : 'rejected';
+//   leave.approver = new Types.ObjectId(approverId);
+//   leave.meta = leave.meta || {};
+//   leave.meta.approverNotes = notes;
+
+//   // track boolean by role
+//   if (user.role === 'admin') leave.isApprovedByAdmin = approve;
+//   if (user.role === 'principal') leave.isApprovedByPrincipal = approve;
+//   if (user.role === 'teacher') leave.isApprovedByIncharge = approve;
+
+//   await leave.save();
+
+//   if (approve) {
+//     const days: Date[] = [];
+//     const cur = new Date(leave.from);
+//     const to = new Date(leave.to);
+//     cur.setUTCHours(0, 0, 0, 0);
+//     to.setUTCHours(0, 0, 0, 0);
+//     while (cur <= to) {
+//       days.push(new Date(cur));
+//       cur.setUTCDate(cur.getUTCDate() + 1);
+//     }
+
+//     const ops = days.map((d) => ({
+//       updateOne: {
+//         filter: { user: leave.user, date: d },
+//         update: {
+//           $set: { user: leave.user, institute: leave.institute, date: d, status: 'onleave' },
+//         },
+//         upsert: true,
+//       },
+//     }));
+
+//     if (ops.length) await this.attendanceModel.bulkWrite(ops, { ordered: false });
+//   }
+
+//   return leave;
+// }
+
+// async listLeaves(
+//   filter: { institute?: string; user?: string; status?: string } = {}
+// ) {
+//   const q: any = {};
+//   if (filter.institute) q.institute = new Types.ObjectId(filter.institute);
+//   if (filter.user) q.user = new Types.ObjectId(filter.user);
+//   if (filter.status) q.status = filter.status;
+//   return this.leaveModel.find(q).sort({ createdAt: -1 }).lean().exec();
+// }
+
+// async approveLeave(
+//   leaveId: string,
+//   approverId: string,
+//   approve: boolean,
+//   notes?: string
+// ) {
+//   const leave = await this.leaveModel.findById(leaveId).exec();
+//   if (!leave) throw new NotFoundException("Leave not found");
+
+//   leave.status = approve ? "approved" : "rejected";
+//   leave.approver = new Types.ObjectId(approverId);
+//   if (!leave.meta) leave.meta = {};
+//   leave.meta.approverNotes = notes;
+//   await leave.save();
+
+//   if (approve) {
+//     const days: Date[] = [];
+//     const cur = new Date(leave.from);
+//     cur.setUTCHours(0, 0, 0, 0);
+//     const to = new Date(leave.to);
+//     to.setUTCHours(0, 0, 0, 0);
+//     while (cur <= to) {
+//       days.push(new Date(cur));
+//       cur.setUTCDate(cur.getUTCDate() + 1);
+//     }
+//     const ops = days.map((d) => ({
+//       updateOne: {
+//         filter: { user: leave.user, date: d },
+//         update: {
+//           $set: {
+//             user: leave.user,
+//             institute: leave.institute,
+//             date: d,
+//             status: "onleave",
+//           },
+//         },
+//         upsert: true,
+//       },
+//     }));
+//     if (ops.length)
+//       await this.attendanceModel.bulkWrite(ops, { ordered: false });
+//   }
+
+//   return leave;
+// }
