@@ -7,6 +7,7 @@ import {
   Req,
   ForbiddenException,
   BadRequestException,
+  Param,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { InstitutesService } from "./institutes.service";
@@ -46,61 +47,81 @@ export class InstituteController {
   // ✅ Create a new branch as a separate institute
 
   @UseGuards(JwtAuthGuard)
-@Post("create-branch")
-async createBranch(@Body() data: any, @Req() req: any) {
-  console.log("🟢 create-branch called, req.user:", req.user);
+  @Post("create-branch")
+  async createBranch(@Body() data: any, @Req() req: any) {
+    console.log("🟢 create-branch called, req.user:", req.user);
 
-  const { sub, role } = req.user;
+    const { sub, role } = req.user;
 
-  if (role !== Role.DIRECTOR) {
-    throw new ForbiddenException("Only directors can create branches");
+    if (role !== Role.DIRECTOR) {
+      throw new ForbiddenException("Only directors can create branches");
+    }
+
+    const director = await this.usersService.findById(sub);
+    if (!director) throw new ForbiddenException("Director not found");
+
+    if (!data.name || !data.city) {
+      throw new BadRequestException("Branch name and city are required");
+    }
+
+    const code = this.generateInstituteCode();
+
+    const branch = await this.institutesService.create({
+      name: data.name,
+      code,
+      address: data.address || "",
+      city: data.city,
+      country: data.country || "Pakistan",
+      province: data.province || "",
+      zone: data.zone || "",
+      sector: data.sector || "",
+      subSector: data.subSector || "",
+      division: data.division || "",
+      district: data.district || "",
+      tehsil: data.tehsil || "",
+      unionCouncil: data.unionCouncil || "",
+      village: data.village || "",
+      contactEmail: director.email,
+
+      // ✅ Only link by director
+      createdByDirector: director._id,
+
+      settings: {
+        createdBy: director.email,
+        establishedYear: data.establishedYear || "",
+        type: data.instituteType || "Private",
+        campusType: "Single Campus", // Each branch is single
+        tier: data.tier || "Standard",
+      },
+    });
+
+    return {
+      message: "✅ Branch created successfully",
+      branch,
+    };
   }
 
-  const director = await this.usersService.findById(sub);
-  if (!director) throw new ForbiddenException("Director not found");
-
-  if (!data.name || !data.city) {
-    throw new BadRequestException("Branch name and city are required");
+  @Get(":id")
+  async getInstitute(@Param("id") id: string) {
+    return this.institutesService.getInstituteById(id);
   }
 
-  const code = this.generateInstituteCode();
+ 
 
-  const branch = await this.institutesService.create({
-    name: data.name,
-    code,
-    address: data.address || "",
-    city: data.city,
-    country: data.country || "Pakistan",
-    province: data.province || "",
-    zone: data.zone || "",
-    sector: data.sector || "",
-    subSector: data.subSector || "",
-    division: data.division || "",
-    district: data.district || "",
-    tehsil: data.tehsil || "",
-    unionCouncil: data.unionCouncil || "",
-    village: data.village || "",
-    contactEmail: director.email,
-
-    // ✅ Only link by director
-    createdByDirector: director._id,
-
-    settings: {
-      createdBy: director.email,
-      establishedYear: data.establishedYear || "",
-      type: data.instituteType || "Private",
-      campusType: "Single Campus", // Each branch is single
-      tier: data.tier || "Standard",
-    },
-  });
-
-  return {
-    message: "✅ Branch created successfully",
-    branch,
-  };
+  // 🔢 Helper to generate random branch code
+  private generateInstituteCode(): string {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    return Array.from({ length: 6 }, () =>
+      chars.charAt(Math.floor(Math.random() * chars.length))
+    ).join("");
+  }
 }
 
-  // @UseGuards(JwtAuthGuard)
+
+
+
+
+ // @UseGuards(JwtAuthGuard)
   // @Post("create-branch")
   // async createBranch(@Body() data: any, @Req() req: any) {
   //     console.log("🟢 create-branch called, req.user:", req.user);
@@ -139,12 +160,3 @@ async createBranch(@Body() data: any, @Req() req: any) {
   //     branch,
   //   };
   // }
-
-  // 🔢 Helper to generate random branch code
-  private generateInstituteCode(): string {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    return Array.from({ length: 6 }, () =>
-      chars.charAt(Math.floor(Math.random() * chars.length))
-    ).join("");
-  }
-}

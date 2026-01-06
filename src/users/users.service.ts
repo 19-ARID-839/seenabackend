@@ -75,6 +75,28 @@ export class UsersService {
     ],
   };
 
+  async assertUserUniqueness(data: {
+  email?: string;
+  phone?: string;
+  cnic?: string;
+}) {
+  if (data.email) {
+    const exists = await this.userModel.findOne({ email: data.email });
+    if (exists) throw new BadRequestException("Email already exists");
+  }
+
+  if (data.phone) {
+    const exists = await this.userModel.findOne({ phone: data.phone });
+    if (exists) throw new BadRequestException("Phone already exists");
+  }
+
+  if (data.cnic) {
+    const exists = await this.userModel.findOne({ cnic: data.cnic });
+    if (exists) throw new BadRequestException("CNIC already exists");
+  }
+}
+
+
   // Example helper to find users by roles and institute
   async findByRolesAndInstitute(instituteId: string, roles: string[]) {
     return this.userModel.find({
@@ -83,45 +105,58 @@ export class UsersService {
     });
   }
 
+  private normalizeInstitute(institute: any) {
+    if (!institute) return institute;
+    if (Types.ObjectId.isValid(institute)) {
+      return new Types.ObjectId(institute);
+    }
+    if (institute?._id && Types.ObjectId.isValid(institute._id)) {
+      return new Types.ObjectId(institute._id);
+    }
+    return institute;
+  }
+
   // users.service.ts
-async checkRequiredRoles(instituteId: string) {
-  const requiredRoles = ["principal", "viceprincipal", "admin"];
+  async checkRequiredRoles(instituteId: string) {
+    const requiredRoles = ["principal", "viceprincipal", "admin"];
 
-  let objectId: mongoose.Types.ObjectId | null = null;
-  if (mongoose.Types.ObjectId.isValid(instituteId)) {
-    objectId = new mongoose.Types.ObjectId(instituteId);
+    let objectId: mongoose.Types.ObjectId | null = null;
+    if (mongoose.Types.ObjectId.isValid(instituteId)) {
+      objectId = new mongoose.Types.ObjectId(instituteId);
+    }
+
+    // 🔍 Ensure we only include valid filters
+    const query: any = {
+      role: { $in: requiredRoles },
+      $or: [
+        { institute: objectId },
+        { instituteCode: instituteId.toUpperCase() },
+      ],
+    };
+
+    if (!objectId) {
+      // If somehow invalid, just match by code
+      delete query.$or;
+      query.instituteCode = instituteId.toUpperCase();
+    }
+
+    const existingUsers = await this.userModel
+      .find(query)
+      .select("name role email institute instituteCode");
+
+    const existingRoles = existingUsers.map((u) => u.role.toLowerCase());
+    const missingRoles = requiredRoles.filter(
+      (r) => !existingRoles.includes(r)
+    );
+
+    console.log(
+      "🧩 Existing users:",
+      existingUsers.map((u) => u.role)
+    );
+    console.log("📋 Missing roles:", missingRoles);
+
+    return { existing: existingUsers, missing: missingRoles };
   }
-
-  // 🔍 Ensure we only include valid filters
-  const query: any = {
-    role: { $in: requiredRoles },
-    $or: [
-      { institute: objectId },
-      { instituteCode: instituteId.toUpperCase() },
-    ],
-  };
-
-  if (!objectId) {
-    // If somehow invalid, just match by code
-    delete query.$or;
-    query.instituteCode = instituteId.toUpperCase();
-  }
-
-  const existingUsers = await this.userModel
-    .find(query)
-    .select("name role email institute instituteCode");
-
-  const existingRoles = existingUsers.map((u) => u.role.toLowerCase());
-  const missingRoles = requiredRoles.filter(
-    (r) => !existingRoles.includes(r)
-  );
-
-  console.log("🧩 Existing users:", existingUsers.map((u) => u.role));
-  console.log("📋 Missing roles:", missingRoles);
-
-  return { existing: existingUsers, missing: missingRoles };
-}
-
 
   // async createUser(data: Partial<User & { institute?: any }>) {
   //   const copy: any = { ...data };
@@ -212,23 +247,20 @@ async checkRequiredRoles(instituteId: string) {
     return u;
   }
 
-  
   // ✅ Get all users for a specific institute
 
-async getUsersByInstitute(instituteId: string) {
-  const id = new Types.ObjectId(instituteId);
-  console.log("🏫 Fetching users for institute:", id);
-  
-  const users = await this.userModel
-    .find({ institute: id })
-    .select("name email phone role institute")
-    .lean();
+  async getUsersByInstitute(instituteId: string) {
+    const id = new Types.ObjectId(instituteId);
+    console.log("🏫 Fetching users for institute:", id);
 
-  console.log("📦 Found users:", users);
-  return { users };
-}
+    const users = await this.userModel
+      .find({ institute: id })
+      .select("name email phone role institute")
+      .lean();
 
-
+    console.log("📦 Found users:", users);
+    return { users };
+  }
 
   async validateUserByPassword(emailOrPhone: string, plain: string) {
     const user = emailOrPhone.includes("@")
@@ -251,7 +283,11 @@ async getUsersByInstitute(instituteId: string) {
       .exec();
   }
 
-  async updateUserProfile(userId: string, profile: any) {
+  async updateUserProfile(
+    userId: string,
+    profile: any,
+    mode: "admin" | "self" = "self"
+  ) {
     const commonFields = [
       "gender",
       "dob",
@@ -283,11 +319,14 @@ async getUsersByInstitute(instituteId: string) {
         "gender"
       );
 
-      if (!profile.className)
+      if (mode === "self" && !profile.className)
         throw new BadRequestException("Class name is required");
-      if (!profile.section)
+      if (mode === "self" && !profile.section)
         throw new BadRequestException("Section is required");
-      if (!profile.subjects || profile.subjects.length === 0)
+      if (
+        mode === "self" &&
+        (!profile.subjects || profile.subjects.length === 0)
+      )
         throw new BadRequestException("At least one subject is required");
 
       if (!user.profile.rollNumber) {
@@ -314,11 +353,14 @@ async getUsersByInstitute(instituteId: string) {
         "address"
       );
 
-      if (!profile.qualification)
+      if (mode === "self" && !profile.qualification)
         throw new BadRequestException("Qualification is required");
-      if (!profile.department)
+      if (mode === "self" && !profile.department)
         throw new BadRequestException("Department is required");
-      if (!profile.subjectsTaught || profile.subjectsTaught.length === 0)
+      if (
+        mode === "self" &&
+        (!profile.subjectsTaught || profile.subjectsTaught.length === 0)
+      )
         throw new BadRequestException(
           "At least one subject taught is required"
         );
@@ -345,46 +387,90 @@ async getUsersByInstitute(instituteId: string) {
         "studentId"
       );
 
-      if (!profile.studentId)
+        if (!Array.isArray(profile.childIds) || profile.childIds.length === 0) {
+    throw new BadRequestException("At least one child is required");
+  }
+
+      if (mode === "self" && !profile.studentId)
         throw new BadRequestException("Student ID is required to link child");
 
-      // Find student by studentId within same institute
-      const student = await this.userModel.findOne({
-        "profile.studentId": profile.studentId,
-        role: "student",
-        institute: user.institute,
-      });
+  const students = await this.userModel.find({
+    _id: { $in: profile.childIds },
+    role: "student",
+    institute: user.institute,
+  });
 
-      if (!student)
-        throw new NotFoundException(
-          "No student found with this ID in your institute"
-        );
+  if (students.length !== profile.childIds.length) {
+    throw new NotFoundException(
+      "One or more students not found in your institute"
+    );
+  }
 
-      // ✅ Add child link to parent
-      await this.userModel.updateOne(
-        { _id: user._id },
-        {
-          $addToSet: {
-            "profile.childIds": student._id,
-          },
-          $set: {
-            "profile.relation": profile.relation || "guardian",
-          },
-        }
-      );
+  // ✅ Link children → parent
+  await this.userModel.updateOne(
+    { _id: user._id },
+    {
+      $addToSet: {
+        "profile.childIds": { $each: profile.childIds },
+      },
+      $set: {
+        "profile.relation": profile.relation || "guardian",
+      },
+    }
+  );
 
-      // ✅ Add parent link to student
-      await this.userModel.updateOne(
-        { _id: student._id },
-        {
-          $addToSet: {
-            "profile.parents": {
-              parentId: user._id,
-              relation: profile.relation || "guardian",
-            },
-          },
-        }
-      );
+  // ✅ Link parent → children
+  await this.userModel.updateMany(
+    { _id: { $in: profile.childIds } },
+    {
+      $addToSet: {
+        "profile.parents": {
+          parentId: user._id,
+          relation: profile.relation || "guardian",
+        },
+      },
+    }
+  );
+
+
+
+      // // Find student by studentId within same institute
+      // const student = await this.userModel.findOne({
+      //   "profile.studentId": profile.studentId,
+      //   role: "student",
+      //   institute: user.institute,
+      // });
+
+      // if (!student)
+      //   throw new NotFoundException(
+      //     "No student found with this ID in your institute"
+      //   );
+
+      // // ✅ Add child link to parent
+      // await this.userModel.updateOne(
+      //   { _id: user._id },
+      //   {
+      //     $addToSet: {
+      //       "profile.childIds": student._id,
+      //     },
+      //     $set: {
+      //       "profile.relation": profile.relation || "guardian",
+      //     },
+      //   }
+      // );
+
+      // // ✅ Add parent link to student
+      // await this.userModel.updateOne(
+      //   { _id: student._id },
+      //   {
+      //     $addToSet: {
+      //       "profile.parents": {
+      //         parentId: user._id,
+      //         relation: profile.relation || "guardian",
+      //       },
+      //     },
+      //   }
+      // );
     }
 
     // 🚌 DRIVER LOGIC
@@ -397,9 +483,9 @@ async getUsersByInstitute(instituteId: string) {
         "gender"
       );
 
-      if (!profile.licenseNumber)
+      if (mode === "self" && !profile.licenseNumber)
         throw new BadRequestException("License number is required");
-      if (!profile.vehicleNumber)
+      if (mode === "self" && !profile.vehicleNumber)
         throw new BadRequestException("Vehicle number is required");
 
       if (!user.profile.driverId)
@@ -416,9 +502,9 @@ async getUsersByInstitute(instituteId: string) {
     else if (["admin", "director"].includes(user.role)) {
       allowed.push("instituteName", "level", "joiningDateAdmin", "address");
 
-      if (!profile.instituteName)
+      if (mode === "self" && !profile.instituteName)
         throw new BadRequestException("Institute name is required");
-      if (!profile.level)
+      if (mode === "self" && !profile.level)
         throw new BadRequestException("Admin/Director level is required");
 
       update["profile.joiningDateAdmin"] =
@@ -466,10 +552,21 @@ async getUsersByInstitute(instituteId: string) {
 
     // 🧩 Decide which fields to select
     const selectFields = fullProfile
-      ? "name email role institute profile"
+      ? "name email role cnic phone institute profile"
       : "name email role institute profile.className profile.section profile.studentId";
 
     return this.userModel.find(query).select(selectFields).exec();
+  }
+
+  async findAllForAdmin(filters: any) {
+    const query: any = {};
+    if (filters.role) query.role = filters.role;
+    if (filters.institute)
+      query.institute = new mongoose.Types.ObjectId(filters.institute);
+    if (filters["profile.className"])
+      query["profile.className"] = filters["profile.className"];
+
+    return this.userModel.find(query).exec(); // returns full document
   }
 
   async setRefreshTokenHash(userId: string, hash: string) {
@@ -477,4 +574,99 @@ async getUsersByInstitute(instituteId: string) {
       .findByIdAndUpdate(userId, { refreshTokenHash: hash })
       .exec();
   }
+
+  // users.service.ts
+  // async createUserWithProfile(data: any) {
+  //   // 1️⃣ create base user
+  //   const user = await this.createUser({
+  //     name: data.name,
+  //     email: data.email,
+  //     phone: data.phone,
+  //     cnic: data.cnic,
+  //     password: data.password,
+  //     role: data.role,
+  //     instituteCode: data.instituteCode,
+  //     institute: data.institute,
+  //   });
+
+  //   // 2️⃣ attach profile if provided
+  //   if (data.profile && Object.keys(data.profile).length > 0) {
+  //     await this.updateUserProfile(String(user._id), data.profile, "admin");
+  //   }
+
+  //   // 3️⃣ return populated user
+  //   return this.findById(user._id);
+  // }
+  async createUserWithProfile(data: any) {
+    const instituteId = this.normalizeInstitute(data.institute);
+
+      await this.assertUserUniqueness({
+    email: data.email,
+    phone: data.phone,
+    cnic: data.cnic,
+  });
+
+
+
+    const user = await this.createUser({
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      cnic: data.cnic,
+      password: data.password,
+      role: data.role,
+      instituteCode: data.instituteCode,
+      institute: instituteId, // 🔥 FIXED
+    });
+
+    if (data.profile && Object.keys(data.profile).length > 0) {
+      await this.updateUserProfile(String(user._id), data.profile, "admin");
+    }
+
+    return this.findById(user._id);
+  }
+
+  // async updateUserByAdmin(userId: string, data: any) {
+  //   const { base, profile } = data;
+
+  //   if (base) {
+  //     await this.userModel.findByIdAndUpdate(userId, base, );
+  //   }
+
+  //   if (profile) {
+  //     await this.updateUserProfile(userId, profile, "admin"); // 🔥 reuse logic
+  //   }
+
+  //   return this.findById(userId);
+  // }
+
+  async updateUserByAdmin(userId: string, data: any) {
+    const { base, profile } = data;
+
+    if (base?.institute) {
+      base.institute = this.normalizeInstitute(base.institute);
+    }
+
+    if (base) {
+      await this.userModel.findByIdAndUpdate(userId, base, { new: true });
+    }
+
+    if (profile) {
+      await this.updateUserProfile(userId, profile, "admin");
+    }
+
+    return this.findById(userId);
+  }
+
+  async deleteUser(id: string) {
+    return this.userModel.findByIdAndDelete(id);
+  }
+
+  async findByIds(ids: string[]) {
+  return this.userModel.find(
+    { _id: { $in: ids } },
+    { name: 1, role: 1, profile: 1 }
+  );
+}
+
 }

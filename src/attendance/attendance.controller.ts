@@ -1,76 +1,147 @@
-import { Controller, Post, Body, Get, Query, Param, Put, BadRequestException, Req, UseGuards } from '@nestjs/common';
-import { AttendanceService } from './attendance.service';
-import { CreateAttendanceDto } from './dto/create-attendance.dto';
-import { BulkAttendanceDto } from './dto/bulk-attendance.dto';
-import { QueryAttendanceDto } from './dto/query-attendance.dto';
-import { CreateLeaveDto, ApproveLeaveDto } from './dto/leave.dto';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
-import { Request } from 'express';
+import {
+  Controller,
+  Post,
+  Body,
+  Get,
+  Query,
+  Param,
+  Put,
+  BadRequestException,
+  Req,
+  UseGuards,
+  Delete,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { AttendanceService } from "./attendance.service";
+import { CreateAttendanceDto } from "./dto/create-attendance.dto";
+import { BulkAttendanceDto } from "./dto/bulk-attendance.dto";
+import { QueryAttendanceDto } from "./dto/query-attendance.dto";
+import {
+  CreateLeaveDto,
+  ApproveLeaveDto,
+  DecideLeaveDto,
+  ResubmitLeaveDto,
+  UpdateLeaveDto,
+} from "./dto/leave.dto";
+import { JwtAuthGuard } from "src/auth/jwt-auth.guard";
+import { Request } from "express";
 
-@Controller('attendance')
+@Controller("attendance")
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
   /** Mark single attendance (create or update) */
-  @Post('mark')
+  @Post("mark")
   async mark(@Body() body: CreateAttendanceDto) {
     return this.attendanceService.markAttendance(body as any);
   }
   @UseGuards(JwtAuthGuard)
   // @Roles('admin', 'teacher')
-  @Post('pending/run')
-  async runPendingCron(@Req() req: Request & { user?: { email?: string; _id?: string } }) {
-    console.log(`🧑‍🏫 ${req.user?.email} triggered manual pending attendance run`);
+  @Post("pending/run")
+  async runPendingCron(
+    @Req() req: Request & { user?: { email?: string; _id?: string } }
+  ) {
+    console.log(
+      `🧑‍🏫 ${req.user?.email} triggered manual pending attendance run`
+    );
     return this.attendanceService.createPendingAttendanceDaily();
   }
-  
-
-
 
   /** Bulk mark attendance for many users */
-  @Post('bulk')
+  @Post("bulk")
   async bulk(@Body() body: BulkAttendanceDto) {
     return this.attendanceService.bulkMark(body.institute, body.items);
   }
 
   /** Get attendance for a user (use query params from/to) */
-  @Get('user/:id')
-  async getUserAttendance(@Param('id') id: string, @Query() q: QueryAttendanceDto) {
+  @Get("user/:id")
+  async getUserAttendance(
+    @Param("id") id: string,
+    @Query() q: QueryAttendanceDto
+  ) {
     return this.attendanceService.getAttendanceByRole(id, q.from, q.to);
   }
 
-  
-
   /** Summary by status (present/absent/late/etc) for an institute, optional role filter */
-  @Get('summary')
+  @Get("summary")
   async summary(@Query() q: QueryAttendanceDto) {
-if (!q.instituteId) throw new BadRequestException('instituteId is required');
-    return this.attendanceService.getAttendanceSummary(q.instituteId, q.from, q.to, q.role);
+    if (!q.instituteId)
+      throw new BadRequestException("instituteId is required");
+    return this.attendanceService.getAttendanceSummary(
+      q.instituteId,
+      q.from,
+      q.to,
+      q.role
+    );
   }
 
   /** Monthly chart data for an institute (and optional user) */
-  @Get('chart/month')
-  async monthlyChart(@Query() q: { instituteId: string; year: string; month: string; userId?: string }) {
+  @Get("chart/month")
+  async monthlyChart(
+    @Query()
+    q: {
+      instituteId: string;
+      year: string;
+      month: string;
+      userId?: string;
+    }
+  ) {
     const year = parseInt(q.year || String(new Date().getUTCFullYear()), 10);
     const month = parseInt(q.month || String(new Date().getUTCMonth() + 1), 10);
-    return this.attendanceService.monthlyChart(q.instituteId, year, month, q.userId);
+    return this.attendanceService.monthlyChart(
+      q.instituteId,
+      year,
+      month,
+      q.userId
+    );
   }
 
   /** Leave endpoints */
-  @Post('leave')
+  @Post("leave")
   async requestLeave(@Body() body: CreateLeaveDto) {
     return this.attendanceService.requestLeave(body as any);
   }
 
-  @Get('leave')
-  async listLeaves(@Query() q: { institute?: string; user?: string; status?: string }) {
+  @Get("leave")
+  async listLeaves(
+    @Query() q: { institute?: string; user?: string; status?: string }
+  ) {
     return this.attendanceService.listLeaves(q);
   }
 
-  @Put('leave/:id/approve')
-  async approveLeave(@Param('id') id: string, @Body() body: ApproveLeaveDto) {
-    return this.attendanceService.approveLeave(id, body.approver, !!body.approve, body.notes);
+  @Put("leave/:id/decision")
+  async decideLeave(@Param("id") id: string, @Body() body: DecideLeaveDto) {
+    return this.attendanceService.decideLeave(id, body);
   }
+
+  @Put("leave/:id/resubmit")
+  async resubmitLeave(@Param("id") id: string, @Body() body: ResubmitLeaveDto) {
+    return this.attendanceService.resubmitLeave(id, body);
+  }
+
+  @Put("leave/:id/edit")
+  async updateLeave(@Param("id") id: string, @Body() body: UpdateLeaveDto) {
+    return this.attendanceService.updateLeaveRequest(id, body);
+  }
+
+  @Delete("leave/:id")
+  @UseGuards(JwtAuthGuard)
+  async deleteLeave(@Param("id") id: string, @Req() req: any) {
+    const userId = req.user?.sub;
+    if (!userId) throw new UnauthorizedException("Unauthorized");
+
+    return this.attendanceService.deleteLeave(id, userId);
+  }
+
+  // @Put("leave/:id/approve")
+  // async approveLeave(@Param("id") id: string, @Body() body: ApproveLeaveDto) {
+  //   return this.attendanceService.approveLeave(
+  //     id,
+  //     body.approver,
+  //     !!body.approve,
+  //     body.notes
+  //   );
+  // }
 
   // ✅ NEW ENDPOINT: update single attendance status
   // @Put('update')

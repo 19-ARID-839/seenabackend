@@ -6,6 +6,7 @@ import { AttendanceService } from './attendance.service';
 import { AttendanceController } from './attendance.controller';
 import { UsersModule } from '../users/users.module';
 import { InstitutesModule } from '../institutes/institutes.module';
+import { NotificationModule } from 'src/notification/notification.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { InstitutesModule } from '../institutes/institutes.module';
     ]),
     UsersModule,
     InstitutesModule,
+    NotificationModule,
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService],

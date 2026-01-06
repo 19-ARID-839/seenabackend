@@ -47,4 +47,6 @@ export class AuthController {
   me(@Req() req: Request) {
     return (req as any).user;
   }
+
+  
 }

@@ -47,4 +47,18 @@ async findByDirectorId(directorId: string) {
     if (!ins) throw new NotFoundException("Institute not found");
     return ins;
   }
+
+async getInstituteById(id: string) {
+  if (!Types.ObjectId.isValid(id)) {
+    throw new NotFoundException('Invalid institute ID');
+  }
+
+  const institute = await this.model.findById(id).lean(); // ✅ use this.model
+  if (!institute) {
+    throw new NotFoundException('Institute not found');
+  }
+
+  return institute;
+}
+
 }
