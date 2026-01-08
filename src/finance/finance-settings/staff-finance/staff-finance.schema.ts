@@ -2,29 +2,30 @@ import { Prop, Schema, SchemaFactory } from "@nestjs/mongoose";
 import { Document, Types } from "mongoose";
 
 @Schema({ timestamps: true })
-export class StudentFinance extends Document {
+export class StaffFinance extends Document {
   @Prop({ type: Types.ObjectId, ref: "Institute", required: true })
   institute!: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: "User", required: true })
-  student!: Types.ObjectId;
+  staff!: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: "Class", required: true })
-  classId!: Types.ObjectId;
+  @Prop({ required: true })
+  role!: string; // teacher | admin | principal | vc
 
-  @Prop({ type: Types.ObjectId, ref: "Section", required: true })
-  sectionId!: Types.ObjectId;
-  @Prop({ required: true }) academicYear!: string;
+  @Prop({ required: true })
+  academicYear!: string;
 
+  /** SNAPSHOT of payroll rule */
   @Prop({ type: Object, required: true })
-  fees!: any;
+  payroll!: {
+    salaryType: string;
+    baseSalary: number;
+    attendanceImpact?: any;
+    leavePolicy?: any;
+    overtimePolicy?: any;
+  };
 
-  @Prop({ type: Object })
-  globalRulesSnapshot!: any;
-
-  @Prop({ type: [Object], default: [] })
-  fineRules!: any[];
-
+  /** Ledger */
   @Prop({
     type: {
       totalPayable: Number,
@@ -41,17 +42,20 @@ export class StudentFinance extends Document {
   })
   ledger: any;
 
-  @Prop({ default: false }) customized!: boolean;
-  @Prop({ default: false }) locked!: boolean;
+  @Prop({ default: false })
+  customized!: boolean;
+
+  @Prop({ default: false })
+  locked!: boolean;
 
   @Prop({
     type: {
-      appliedFrom: String,
+      appliedFrom: String, // role-rule
       ruleId: String,
     },
   })
   source: any;
 }
 
-export const StudentFinanceSchema =
-  SchemaFactory.createForClass(StudentFinance);
+export const StaffFinanceSchema =
+  SchemaFactory.createForClass(StaffFinance);

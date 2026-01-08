@@ -19,6 +19,7 @@ import { PaymentSettingsDto } from "./dto/PaymentSettingsDto";
 import { StaffPayrollRuleDto } from "./dto/StaffPayrollRuleDto";
 import { JwtAuthGuard } from "src/auth/jwt-auth.guard";
 import { StudentFinanceSeeting } from "./student-finance/student-finance.service";
+import { StaffFinanceService } from "./staff-finance/staff-finance.service";
 console.log("CreateFinanceSettingsDto:", CreateFinanceSettingsDto);
 console.log("ClassFeeRuleDto:", ClassFeeRuleDto);
 console.log("StaffPayrollRuleDto:", StaffPayrollRuleDto);
@@ -28,7 +29,8 @@ console.log("StaffPayrollRuleDto:", StaffPayrollRuleDto);
 export class FinanceSettingsController {
   constructor(
     private readonly service: FinanceSettingsService,
-    private readonly studentservice: StudentFinanceSeeting
+    private readonly studentservice: StudentFinanceSeeting,
+    private readonly staffservice: StaffFinanceService
   ) {}
 
   @Post()
@@ -137,5 +139,12 @@ export class FinanceSettingsController {
 
     console.log("Apply result:", result);
     return result;
+  }
+
+  @Post("apply/staff/:role")
+  async applyPayrollByRole(@Param("role") role: string, @Req() req: any) {
+    const instituteId = req.user.institute;
+
+    return this.staffservice.applyPayrollByRole(instituteId, role);
   }
 }

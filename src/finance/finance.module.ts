@@ -19,11 +19,21 @@ import {
   FinanceSettings,
   FinanceSettingsSchema,
 } from "./finance-settings/finance-settings.schema";
-import { StudentFinance, StudentFinanceSchema } from "./finance-settings/student-finance/student-finance.schema";
+import {
+  StudentFinance,
+  StudentFinanceSchema,
+} from "./finance-settings/student-finance/student-finance.schema";
 import { StudentFinanceSeeting } from "./finance-settings/student-finance/student-finance.service";
 import { Class, ClassSchema } from "src/classes/schema/class.schema";
-console.log('FinanceSettings:', FinanceSettings);
-console.log('FinanceSettings.name:', FinanceSettings?.name);
+import {
+  StaffFinance,
+  StaffFinanceSchema,
+} from "./finance-settings/staff-finance/staff-finance.schema";
+import { StaffFinanceService } from "./finance-settings/staff-finance/staff-finance.service";
+import { StudentFinanceController } from "./finance-settings/student-finance/student-finance.controller";
+import { StaffFinanceController } from "./finance-settings/staff-finance/staff-finance.controller";
+console.log("FinanceSettings:", FinanceSettings);
+console.log("FinanceSettings.name:", FinanceSettings?.name);
 
 @Module({
   imports: [
@@ -34,12 +44,23 @@ console.log('FinanceSettings.name:', FinanceSettings?.name);
       { name: Salary.name, schema: SalarySchema },
       { name: User.name, schema: UserSchema }, // Placeholder for User schema
       { name: FinanceSettings.name, schema: FinanceSettingsSchema },
-      { name: StudentFinance.name, schema: StudentFinanceSchema},
-      { name: Class.name, schema: ClassSchema}
+      { name: StudentFinance.name, schema: StudentFinanceSchema },
+      { name: Class.name, schema: ClassSchema },
+      { name: StaffFinance.name, schema: StaffFinanceSchema },
     ]),
     NotificationModule,
   ],
-  controllers: [FinanceController, FinanceSettingsController],
-  providers: [FinanceService, FinanceSettingsService, StudentFinanceSeeting],
+  controllers: [
+    FinanceController,
+    FinanceSettingsController,
+    StudentFinanceController,
+    StaffFinanceController,
+  ],
+  providers: [
+    FinanceService,
+    FinanceSettingsService,
+    StudentFinanceSeeting,
+    StaffFinanceService,
+  ],
 })
 export class FinanceModule {}
