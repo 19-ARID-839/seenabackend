@@ -4,6 +4,8 @@ import { Model, Types } from "mongoose";
 import { FinanceSettings } from "../finance-settings.schema";
 import { StaffFinance } from "./staff-finance.schema";
 import { User } from "src/users/user.schema";
+import { CreateSalaryChallanDto } from "./dto/create-salary-challan.dto";
+import { StaffSalaryChallan } from "./staff-salary-challan.schema";
 
 @Injectable()
 export class StaffFinanceService {
@@ -15,7 +17,10 @@ export class StaffFinanceService {
     private staffFinanceModel: Model<StaffFinance>,
 
     @InjectModel(User.name)
-    private userModel: Model<User>
+    private userModel: Model<User>,
+
+     @InjectModel(StaffSalaryChallan.name)
+    private challanModel: Model<StaffSalaryChallan>
   ) {}
 
   async applyPayrollByRole(instituteId: string, role: string) {
@@ -62,6 +67,7 @@ export class StaffFinanceService {
             institute: new Types.ObjectId(instituteId),
             staff: staff._id,
             academicYear,
+            customized: false, // 🔥 DO NOT override manual payroll
           },
           update: {
             $setOnInsert: {
@@ -89,24 +95,21 @@ export class StaffFinanceService {
     };
   }
 
+  async getAll(instituteId: string) {
+    return this.staffFinanceModel
+      .find({
+        institute: new Types.ObjectId(instituteId), // 🔥 FIX
+      })
+      .populate("staff", "name role")
+      .lean();
+  }
 
-async getAll(instituteId: string) {
-  return this.staffFinanceModel
-    .find({
-      institute: new Types.ObjectId(instituteId), // 🔥 FIX
-    })
-    .populate("staff", "name role")
-    .lean();
-}
-
-
-  async updateById(
-    instituteId: string,
-    id: string,
-    payload: any
-  ) {
+  async updateById(instituteId: string, id: string, payload: any) {
     const updated = await this.staffFinanceModel.findOneAndUpdate(
-      { _id: id, institute: instituteId },
+      {
+        _id: new Types.ObjectId(id),
+        institute: new Types.ObjectId(instituteId),
+      },
       {
         $set: {
           payroll: payload.payroll,
@@ -117,7 +120,7 @@ async getAll(instituteId: string) {
     );
 
     if (!updated) {
-      throw new BadRequestException("Staff finance not found");
+      throw new BadRequestException("Staff payroll not found");
     }
 
     return {
@@ -125,4 +128,118 @@ async getAll(instituteId: string) {
       data: updated,
     };
   }
+
+
+    async create(instituteId: string, dto: CreateSalaryChallanDto) {
+    const sf = await this.staffFinanceModel.findOne({
+      _id: new Types.ObjectId(dto.staffFinanceId),
+      institute: new Types.ObjectId(instituteId),
+    });
+
+    if (!sf) {
+      throw new BadRequestException("Staff finance not found");
+    }
+
+    // ❌ Duplicate challan guard (monthly)
+    const exists = await this.challanModel.findOne({
+      institute: new Types.ObjectId(instituteId),
+      staff: sf.staff,
+      academicYear: sf.academicYear,
+      month: dto.month,
+    });
+
+    if (exists) {
+      throw new BadRequestException(
+        "Salary challan already exists for this month",
+      );
+    }
+
+    const baseSalary = sf.payroll.baseSalary;
+
+    return this.challanModel.create({
+      institute: new Types.ObjectId(instituteId),
+      staff: sf.staff,
+      staffFinance: sf._id,
+      academicYear: sf.academicYear,
+      month: dto.month,
+      salarySnapshot: {
+        salaryType: sf.payroll.salaryType,
+        baseSalary,
+      },
+      grossSalary: baseSalary,
+      deduction: 0,
+      netPayable: baseSalary,
+    });
+  }
+
+  async getAllChallan(instituteId: string) {
+    return this.challanModel
+      .find({ institute: new Types.ObjectId(instituteId) })
+      .populate("staff", "name role")
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+
+
+    async payChallan(
+    instituteId: string,
+    challanId: string,
+    method: "cash" | "bank" = "cash",
+    extraAmount: number = 0
+  ) {
+    const challan = await this.challanModel.findOne({
+      _id: new Types.ObjectId(challanId),
+      institute: new Types.ObjectId(instituteId),
+    });
+
+    if (!challan) {
+      throw new BadRequestException("Salary challan not found");
+    }
+
+    if (challan.status === "paid") {
+      throw new BadRequestException("Salary already paid");
+    }
+
+    // Update ledger in staff finance
+    const staffFinance = await this.staffFinanceModel.findById(
+      challan.staffFinance
+    );
+
+    if (!staffFinance) {
+      throw new BadRequestException("Staff finance not found");
+    }
+
+    const totalPaid = challan.netPayable + extraAmount;
+
+    // Update challan
+    const updatedChallan = await this.challanModel.findOneAndUpdate(
+      { _id: challan._id },
+      {
+        $set: {
+          status: "paid",
+          netPayable: challan.netPayable + extraAmount,
+        },
+      },
+      { new: true }
+    );
+
+    // Update staff ledger
+    staffFinance.ledger.totalPaid += totalPaid;
+    staffFinance.ledger.outstanding =
+      staffFinance.ledger.totalPayable - staffFinance.ledger.totalPaid;
+    staffFinance.ledger.payments.push({
+      amount: totalPaid,
+      method,
+      date: new Date(),
+      challan: challan._id,
+    });
+
+    await staffFinance.save();
+
+    return {
+      message: `Salary paid successfully: Rs. ${totalPaid}`,
+      data: updatedChallan,
+    };
+  }
+
 }

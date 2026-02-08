@@ -32,6 +32,19 @@ import {
 import { StaffFinanceService } from "./finance-settings/staff-finance/staff-finance.service";
 import { StudentFinanceController } from "./finance-settings/student-finance/student-finance.controller";
 import { StaffFinanceController } from "./finance-settings/staff-finance/staff-finance.controller";
+import { FeeChallanService } from "./finance-settings/student-finance/fee-challan.service";
+import {
+  FeeChallan,
+  FeeChallanSchema,
+} from "./finance-settings/student-finance/Other-Schema/fee-challan.schema";
+import { FeeChallanController } from "./finance-settings/student-finance/fee-challan.controller";
+import {
+  StudentFineLedger,
+  StudentFineLedgerSchema,
+} from "./finance-settings/student-finance/student-fine-ledger/student-fine-ledger.schema";
+import { FineLedgerListener } from "./finance-settings/student-finance/student-fine-ledger/fine-ledger.listener";
+import { FeePayment, FeePaymentSchema } from "./finance-settings/student-finance/Other-Schema/fee-payment.schema";
+import { StaffSalaryChallan, StaffSalaryChallanSchema } from "./finance-settings/staff-finance/staff-salary-challan.schema";
 console.log("FinanceSettings:", FinanceSettings);
 console.log("FinanceSettings.name:", FinanceSettings?.name);
 
@@ -47,6 +60,10 @@ console.log("FinanceSettings.name:", FinanceSettings?.name);
       { name: StudentFinance.name, schema: StudentFinanceSchema },
       { name: Class.name, schema: ClassSchema },
       { name: StaffFinance.name, schema: StaffFinanceSchema },
+      { name: FeeChallan.name, schema: FeeChallanSchema },
+      { name: StudentFineLedger.name, schema: StudentFineLedgerSchema },
+      { name: FeePayment.name, schema: FeePaymentSchema},
+      { name: StaffSalaryChallan.name, schema: StaffSalaryChallanSchema},
     ]),
     NotificationModule,
   ],
@@ -55,12 +72,16 @@ console.log("FinanceSettings.name:", FinanceSettings?.name);
     FinanceSettingsController,
     StudentFinanceController,
     StaffFinanceController,
+    FeeChallanController,
+    
   ],
   providers: [
     FinanceService,
     FinanceSettingsService,
     StudentFinanceSeeting,
     StaffFinanceService,
+    FeeChallanService,
+    FineLedgerListener,
   ],
 })
 export class FinanceModule {}
