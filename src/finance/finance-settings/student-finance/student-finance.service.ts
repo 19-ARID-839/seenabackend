@@ -1,9 +1,12 @@
 import { Injectable, BadRequestException } from "@nestjs/common";
 import { InjectModel } from "@nestjs/mongoose";
 import { Model, Types } from "mongoose";
+import dayjs from "dayjs";
 import { Class } from "src/classes/schema/class.schema";
 import { FinanceSettings } from "../finance-settings.schema";
 import { StudentFinance } from "./student-finance.schema";
+import { GenerateFeeCycleDto } from "./dto/generate-fee-cycle.dto";
+import { StudentFeeCycle } from "./Other-Schema/student-fee-cycle.schema";
 
 @Injectable()
 export class StudentFinanceSeeting {
@@ -15,7 +18,10 @@ export class StudentFinanceSeeting {
     private studentFinanceModel: Model<StudentFinance>,
 
     @InjectModel(Class.name)
-    private classModel: Model<Class>
+    private classModel: Model<Class>,
+
+    @InjectModel(Class.name)
+    private feeCycleModel: Model<StudentFeeCycle>
   ) {}
 
   async applyClassFinance(
@@ -117,6 +123,7 @@ export class StudentFinanceSeeting {
               institute: instituteObjId,
               student: studentObjId,
               academicYear,
+              customized: false, // 🔥 PROTECTION
             },
             update: {
               $setOnInsert: {
@@ -148,23 +155,31 @@ export class StudentFinanceSeeting {
   }
 
   async getAll(instituteId: string) {
-    return this.studentFinanceModel
-      .find({
-        institute: new Types.ObjectId(instituteId), // 🔥 FIX
-      })
-      .populate("student", "name rollNumber profile.className profile.section")
-      // .populate("classId", "name")
-      // .populate("sectionId", "name")
-      .lean();
+    return (
+      this.studentFinanceModel
+        .find({
+          institute: new Types.ObjectId(instituteId), // 🔥 FIX
+        })
+        .populate(
+          "student",
+          "name rollNumber profile.className profile.section"
+        )
+        // .populate("classId", "name")
+        // .populate("sectionId", "name")
+        .lean()
+    );
   }
 
   async updateById(instituteId: string, id: string, payload: any) {
     const updated = await this.studentFinanceModel.findOneAndUpdate(
-      { _id: id, institute: instituteId },
+      {
+        _id: new Types.ObjectId(id),
+        institute: new Types.ObjectId(instituteId),
+      },
       {
         $set: {
           fees: payload.fees,
-          fineRules: payload.fineRules,
+          ...(payload.fineRules && { fineRules: payload.fineRules }),
           customized: true,
         },
       },
@@ -180,4 +195,187 @@ export class StudentFinanceSeeting {
       data: updated,
     };
   }
+
+  async generateFeeCycles(instituteId: string, dto: GenerateFeeCycleDto) {
+    const students = await this.studentFinanceModel.find({
+      institute: new Types.ObjectId(instituteId),
+      locked: false,
+    });
+
+    let created = 0;
+
+    for (const sf of students) {
+      const exists = await this.feeCycleModel.findOne({
+        student: sf.student,
+        academicYear: sf.academicYear,
+        "period.type": dto.type,
+        ...(dto.month && { "period.month": dto.month }),
+        ...(dto.quarter && { "period.quarter": dto.quarter }),
+      });
+
+      if (exists) continue;
+
+      const baseAmount =
+        (sf.fees?.tuitionFee ?? 0) +
+        (sf.fees?.examFeePerTerm ?? 0) +
+        (sf.fees?.transportFee?.enabled ? sf.fees.transportFee.amount : 0);
+
+      const dueDate = dayjs().date(sf.globalRulesSnapshot.feeDeadline).toDate();
+
+      await this.feeCycleModel.create({
+        institute: sf.institute,
+        student: sf.student,
+        academicYear: sf.academicYear,
+        period: {
+          type: dto.type,
+          month: dto.month,
+          quarter: dto.quarter,
+        },
+        dueDate,
+        baseAmount,
+        fine: {
+          perDay: sf.fees?.lateFee?.amount ?? 0,
+          maxCap: sf.fees?.lateFee?.maxCap ?? 0,
+          currentAmount: 0,
+        },
+        totalPayable: baseAmount,
+        totalPaid: 0,
+        outstanding: baseAmount,
+        status: "pending",
+        locked: false,
+        notifications: { remindersSent: [] },
+      });
+
+      created++;
+    }
+
+    return {
+      message: `Fee cycles generated`,
+      created,
+    };
+  }
+
+  //   @Cron("0 5 0 * * *")
+  // async generateMonthlyFeeCycles() {
+  //   const students = await this.studentFinanceModel.find({
+  //     locked: false,
+  //   });
+
+  //   for (const sf of students) {
+  //     const exists = await this.feeCycleModel.findOne({
+  //       student: sf.student,
+  //       academicYear: sf.academicYear,
+  //       "period.month": currentMonth,
+  //     });
+
+  //     if (exists) continue;
+
+  //     const dueDate = dayjs()
+  //       .date(settings.feeDeadline)
+  //       .toDate();
+
+  //     await this.feeCycleModel.create({
+  //       institute: sf.institute,
+  //       student: sf.student,
+  //       academicYear: sf.academicYear,
+  //       period: { type: "monthly", month: currentMonth },
+  //       dueDate,
+  //       baseAmount: calculateBase(sf.fees),
+  //       fine: {
+  //         perDay: sf.fees.lateFee?.amount ?? 0,
+  //         maxCap: sf.fees.lateFee?.maxCap ?? 0,
+  //         currentAmount: 0,
+  //       },
+  //       totalPayable,
+  //       outstanding: totalPayable,
+  //       status: "pending",
+  //     });
+  //   }
+  // }
+
+  // @Cron("0 10 0 * * *")
+  // async sendFeeReminders() {
+  //   const today = dayjs().date();
+
+  //   const cycles = await this.feeCycleModel.find({
+  //     status: { $in: ["pending", "partial"] },
+  //     locked: false,
+  //   });
+
+  //   for (const cycle of cycles) {
+  //     const dueDay = dayjs(cycle.dueDate).date();
+
+  //     const daysBefore = dueDay - today;
+
+  //     if (!reminderDays.includes(daysBefore)) continue;
+
+  //     if (cycle.notifications.remindersSent.includes(daysBefore)) continue;
+
+  //     await notifyStudentAndParents(cycle);
+
+  //     await this.feeCycleModel.updateOne(
+  //       { _id: cycle._id },
+  //       {
+  //         $push: {
+  //           "notifications.remindersSent": daysBefore,
+  //         },
+  //         $set: { "notifications.lastNotifiedAt": new Date() },
+  //       }
+  //     );
+  //   }
+  // }
+
+  // @Cron("0 15 0 * * *")
+  // async applyLateFees() {
+  //   const today = dayjs();
+
+  //   const overdueCycles = await this.feeCycleModel.find({
+  //     status: { $in: ["pending", "partial"] },
+  //     dueDate: { $lt: today.toDate() },
+  //     locked: false,
+  //   });
+
+  //   for (const cycle of overdueCycles) {
+  //     const daysLate = today.diff(dayjs(cycle.dueDate), "day");
+
+  //     const fine = Math.min(
+  //       daysLate * cycle.fine.perDay,
+  //       cycle.fine.maxCap
+  //     );
+
+  //     if (fine === cycle.fine.currentAmount) continue;
+
+  //     await this.feeCycleModel.updateOne(
+  //       { _id: cycle._id },
+  //       {
+  //         $set: {
+  //           "fine.currentAmount": fine,
+  //           outstanding: cycle.baseAmount + fine - cycle.totalPaid,
+  //           status: "overdue",
+  //         },
+  //       }
+  //     );
+
+  //     await notifyLateFee(cycle, fine);
+  //   }
+  // }
+
+  // async recordPayment(dto) {
+  //   await paymentModel.create(...);
+
+  //   await feeCycleModel.updateOne(
+  //     { _id: dto.feeCycleId },
+  //     {
+  //       $inc: {
+  //         totalPaid: dto.amount,
+  //         outstanding: -dto.amount,
+  //       },
+  //     }
+  //   );
+
+  //   if (outstanding <= 0) {
+  //     status = "paid";
+  //     locked = true;
+  //   }
+  // }
 }

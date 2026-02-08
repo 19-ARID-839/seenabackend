@@ -18,10 +18,12 @@ import {
   UpdateLeaveDto,
 } from "./dto/leave.dto";
 import { NotificationService } from "src/notification/notification.service";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 
 @Injectable()
 export class AttendanceService {
   constructor(
+    private eventEmitter: EventEmitter2,
     @InjectModel(Attendance.name)
     private attendanceModel: Model<AttendanceDocument>,
     @InjectModel(LeaveRequest.name)
@@ -200,6 +202,9 @@ export class AttendanceService {
         .exec();
 
       console.log("✅ Attendance saved:", doc);
+      // 🔥 EMIT EVENT
+      this.eventEmitter.emit("attendance.marked", doc);
+
       return doc;
     } catch (error) {
       const errMsg =
@@ -665,21 +670,26 @@ export class AttendanceService {
       at: new Date(),
     });
 
-      await leave.save();
+    await leave.save();
 
+    // ✅ Send notification to the leave creator
+    const message = approve
+      ? `Congratulations! Your leave request has been approved by ${
+          user.name || user.email
+        }.`
+      : `Your leave request has been rejected by ${
+          user.name || user.email
+        }. Reason: ${
+          rejectionReason || "Not specified"
+        }. You may resubmit if needed.`;
 
-  // ✅ Send notification to the leave creator
-  const message = approve
-    ? `Congratulations! Your leave request has been approved by ${user.name || user.email}.`
-    : `Your leave request has been rejected by ${user.name || user.email}. Reason: ${rejectionReason || "Not specified"}. You may resubmit if needed.`;
-
-  await this.notify({
-    sender: approverId,
-    receiver: leave.user.toString(),
-    institute: leave.institute.toString(),
-    message,
-    messageType: "leave", // must match your Notification enum
-  });
+    await this.notify({
+      sender: approverId,
+      receiver: leave.user.toString(),
+      institute: leave.institute.toString(),
+      message,
+      messageType: "leave", // must match your Notification enum
+    });
     return leave;
   }
 
@@ -709,44 +719,43 @@ export class AttendanceService {
       at: new Date(),
     });
 
-  await leave.save();
+    await leave.save();
 
-  // ✅ Notify all teachers / class incharge
-  await this.notifyRole({
-    sender: leave.user.toString(),
-    receiverRole: "teacher",
-    institute: leave.institute.toString(),
-    message: `Leave request has been resubmitted by the student. Please review.`,
-    messageType: "general",
-    meta: { leaveId: leave._id.toString() },
-  });
+    // ✅ Notify all teachers / class incharge
+    await this.notifyRole({
+      sender: leave.user.toString(),
+      receiverRole: "teacher",
+      institute: leave.institute.toString(),
+      message: `Leave request has been resubmitted by the student. Please review.`,
+      messageType: "general",
+      meta: { leaveId: leave._id.toString() },
+    });
 
-  return leave;
-
+    return leave;
   }
 
+  async deleteLeave(leaveId: string, userId: string) {
+    const leave = await this.leaveModel.findById(leaveId);
+    if (!leave) throw new NotFoundException("Leave not found");
 
-async deleteLeave(leaveId: string, userId: string) {
-  const leave = await this.leaveModel.findById(leaveId);
-  if (!leave) throw new NotFoundException("Leave not found");
+    // Only creator can delete
+    if (!leave.user.equals(userId)) {
+      throw new ForbiddenException(
+        "You can only delete your own leave requests"
+      );
+    }
 
-  // Only creator can delete
-  if (!leave.user.equals(userId)) {
-    throw new ForbiddenException("You can only delete your own leave requests");
+    // Check leave status
+    if (leave.status === "approved" || leave.status === "resubmitted") {
+      throw new BadRequestException(
+        `Cannot delete a leave that is ${leave.status}`
+      );
+    }
+
+    await leave.deleteOne();
+
+    return { message: "Leave request deleted successfully" };
   }
-
-  // Check leave status
-  if (leave.status === "approved" || leave.status === "resubmitted") {
-    throw new BadRequestException(
-      `Cannot delete a leave that is ${leave.status}`
-    );
-  }
-
-  await leave.deleteOne();
-
-  return { message: "Leave request deleted successfully" };
-}
-
 
   @Cron("0 0 * * *", { timeZone: "Asia/Karachi" }) // ⏰ runs daily at 12:00 AM PKT
   async createPendingAttendanceDaily() {
